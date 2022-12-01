@@ -1,102 +1,28 @@
-import queue
-import pytest
 import boto3
-import json
 
 from botocore.stub import Stubber
 from queue import Queue
 
-from src.unnester_spark_job import (
-    UnknownPartitionTypeException,
-    Task,
-    create_partition,
+from table_refresh.table_refresh import RefreshTask
+
+from unnester_spark_job.unnester_spark_job import (
     unnester_worker,
-    refresher_worker,
-    parse_config,
     get_max_concurrent_runs,
-    spawn_unnester_workers,
-    spawn_table_refresh_workers,
+    populate_tasks,
+    UnnestTask,
+    parse_config,
 )
-
-
-def test_create_partiton_for_single_date_partition_returns_expected():
-    partitions = [("logical_date", "date", "2022-10-10", "2022-10-14")]
-    partitions_gen = create_partition(partitions)
-
-    assert next(partitions_gen) == "logical_date=2022-10-10"
-    assert next(partitions_gen) == "logical_date=2022-10-11"
-    assert next(partitions_gen) == "logical_date=2022-10-12"
-    assert next(partitions_gen) == "logical_date=2022-10-13"
-    assert next(partitions_gen) == "logical_date=2022-10-14"
-    with pytest.raises(StopIteration):
-        next(partitions_gen)
-
-
-def test_create_partiton_for_single_numeric_partition_returns_expected():
-    partitions = [("day", "numeric", 4, 7)]
-    partitions_gen = create_partition(partitions)
-
-    assert next(partitions_gen) == "day=4"
-    assert next(partitions_gen) == "day=5"
-    assert next(partitions_gen) == "day=6"
-    assert next(partitions_gen) == "day=7"
-    with pytest.raises(StopIteration):
-        next(partitions_gen)
-
-
-def test_create_partiton_for_multiple_partitions_returns_expected():
-    partitions = [
-        ("logical_date", "date", "2022-08-01", "2022-08-02"),
-        ("hour", "numeric", 8, 9),
-        ("minute", "numeric", 2, 5),
-    ]
-    partitions_gen = create_partition(partitions)
-
-    assert next(partitions_gen) == "logical_date=2022-08-01/hour=8/minute=2"
-    assert next(partitions_gen) == "logical_date=2022-08-01/hour=8/minute=3"
-    assert next(partitions_gen) == "logical_date=2022-08-01/hour=8/minute=4"
-    assert next(partitions_gen) == "logical_date=2022-08-01/hour=8/minute=5"
-    assert next(partitions_gen) == "logical_date=2022-08-01/hour=9/minute=2"
-    assert next(partitions_gen) == "logical_date=2022-08-01/hour=9/minute=3"
-    assert next(partitions_gen) == "logical_date=2022-08-01/hour=9/minute=4"
-    assert next(partitions_gen) == "logical_date=2022-08-01/hour=9/minute=5"
-    assert next(partitions_gen) == "logical_date=2022-08-02/hour=8/minute=2"
-    assert next(partitions_gen) == "logical_date=2022-08-02/hour=8/minute=3"
-    assert next(partitions_gen) == "logical_date=2022-08-02/hour=8/minute=4"
-    assert next(partitions_gen) == "logical_date=2022-08-02/hour=8/minute=5"
-    assert next(partitions_gen) == "logical_date=2022-08-02/hour=9/minute=2"
-    assert next(partitions_gen) == "logical_date=2022-08-02/hour=9/minute=3"
-    assert next(partitions_gen) == "logical_date=2022-08-02/hour=9/minute=4"
-    assert next(partitions_gen) == "logical_date=2022-08-02/hour=9/minute=5"
-    with pytest.raises(StopIteration):
-        next(partitions_gen)
-
-
-def test_create_partition_returns_exception_for_unknown_partition_type():
-    partitions = [("day", "numberic", 4, 7)]
-
-    with pytest.raises(UnknownPartitionTypeException):
-        partitions_gen = create_partition(partitions)
-        next(partitions_gen)
-
-
-def test_task_partitions_correctly_set(default_task):
-
-    assert default_task.partitions == [
-        {"name": "logical_date", "value": "2018-10-02"},
-        {"name": "hour", "value": "5"},
-    ]
 
 
 def test_unnester_worker_called_with_correct_args(mocker, default_task, unnester_name):
     mock_client = mocker.Mock()
     mock_client.start_job_run.return_value = {"JobRunId": "a1"}
     mock_client.get_job_run.return_value = {"JobRun": {"JobRunState": "SUCCESS"}}
-    in_q = queue.Queue()
-    out_q = queue.Queue()
+    in_q = Queue()
+    out_q = Queue()
 
-    in_q.put(default_task)
-    in_q.put(None)
+    in_q.put([default_task])
+    in_q.put([None])
 
     unnester_worker(mock_client, in_q, out_q)
 
@@ -111,9 +37,9 @@ def test_unnester_worker_called_with_correct_args(mocker, default_task, unnester
             "--nested_column_key": default_task.nested_column_key,
             "--nested_value_key": default_task.nested_value_key,
             "--target_file_format":	default_task.target_file_format,
-            "--source_location": f"{default_task.source_location}/{default_task.partitions_str}",
+            "--source_location": f"{default_task.source_location}/{default_task.partition_str}",
             "--source_file_format":	default_task.source_file_format,
-            "--target_location": f"{default_task.target_location}/{default_task.partitions_str}",
+            "--target_location": f"{default_task.target_location}/{default_task.partition_str}",
             "--nested_column_name":	default_task.nested_column_name,
         }
     )
@@ -124,7 +50,7 @@ def test_unnester_worker_called_with_correct_args(mocker, default_task, unnester
 
 
 def test_unnester_worker_waits_for_job_getting_ready(mocker, default_task):
-    mock_sleep = mocker.patch("src.unnester_spark_job.time.sleep")
+    mock_sleep = mocker.patch("unnester_spark_job.unnester_spark_job.time.sleep")
     client = boto3.client("glue")
     stubber = Stubber(client)
     stubber.add_client_error(method="start_job_run", service_error_code="ConcurrentRunsExceededException")
@@ -135,38 +61,10 @@ def test_unnester_worker_waits_for_job_getting_ready(mocker, default_task):
         in_q = Queue()
         out_q = Queue()
 
-        in_q.put(default_task)
-        in_q.put(None)
+        in_q.put([default_task])
+        in_q.put([None])
         unnester_worker(client, in_q, out_q)
     mock_sleep.assert_called_once()
-
-
-def test_refresher_worker_called_with_correct_args(mocker, default_task, refresher_name):
-    mock_client = mocker.Mock()
-    mock_client.invoke.return_value = {"StatusCode": 200}
-    in_q = queue.Queue();
-    in_q.put(default_task)
-    in_q.put(None)
-
-    refresher_worker(mock_client, in_q)
-
-    mock_client.invoke.assert_called_once_with(
-        FunctionName=refresher_name,
-        Payload=json.dumps({
-            "database_name": default_task.database,
-            "table_name": default_task.table_name,
-            "partitions": default_task.partitions,
-        })
-    )
-
-@pytest.mark.parametrize("args, expected", [
-    (["--arg_1", "value_1", "--arg_2", "value_2"], {"arg_1": "value_1", "arg_2": "value_2"}),
-    (["--arg-1", "value_1", "--arg-2", "value_2"], {"arg_1": "value_1", "arg_2": "value_2"}),
-    (["--arg_1", "value-1", "--arg_2", "value-2"], {"arg_1": "value-1", "arg_2": "value-2"}),
-    (["arg_1", "value_1", "arg_2", "value_2"], {"arg_1": "value_1", "arg_2": "value_2"}),
-])
-def test_parse_config_returns_expected(args, expected):
-    assert parse_config(args) == expected
 
 
 def test_get_max_concurrent_runs_returns_expected():
@@ -178,3 +76,112 @@ def test_get_max_concurrent_runs_returns_expected():
     with stubber:
         assert get_max_concurrent_runs(client) == max_runs
 
+
+def test_populate_tasks_creates_expected(mocker):
+    mock_q = mocker.Mock()
+    mock_config = parse_config([
+        "--source-location", "s100://test",
+        "--source-file-format", "json",
+        "--target-location", "s100://target",
+        "--target-file-format", "parquet",
+        "--nested-column-name", "nested_column_test",
+        "--nested-column-key", "test_name",
+        "--nested-value-key", "test_value",
+        "--partition", "year", "numeric", "2010", "2011",
+        "--database", "test_db",
+        "--table-name", "test_table",
+        "--refresh", "true",
+    ])
+
+    populate_tasks(mock_config, mock_q)
+
+    assert mock_q.put.call_count == 2
+    mock_q.put.assert_has_calls([
+        mocker.call([
+            UnnestTask(
+                task_id="",
+                source_location=mock_config.source_location,
+                source_file_format=mock_config.source_file_format,
+                target_location=mock_config.target_location,
+                target_file_format=mock_config.target_file_format,
+                nested_column_name=mock_config.nested_column_name,
+                nested_column_key=mock_config.nested_column_key,
+                nested_value_key=mock_config.nested_value_key,
+                partition_str="year=2010",
+                status="UNKNOWN"
+            ),
+            RefreshTask(
+                database=mock_config.database,
+                table_name=mock_config.table_name,
+                partition_str="year=2010",
+            )
+        ]),
+        mocker.call([
+            UnnestTask(
+                task_id="",
+                source_location=mock_config.source_location,
+                source_file_format=mock_config.source_file_format,
+                target_location=mock_config.target_location,
+                target_file_format=mock_config.target_file_format,
+                nested_column_name=mock_config.nested_column_name,
+                nested_column_key=mock_config.nested_column_key,
+                nested_value_key=mock_config.nested_value_key,
+                partition_str="year=2011",
+                status="UNKNOWN"
+            ),
+            RefreshTask(
+                database=mock_config.database,
+                table_name=mock_config.table_name,
+                partition_str="year=2011",
+            )
+        ])
+    ])
+
+
+def test_populate_tasks_without_refresh_creates_expected(mocker):
+    mock_q = mocker.Mock()
+    mock_config = parse_config([
+        "--source-location", "s100://test",
+        "--source-file-format", "json",
+        "--target-location", "s100://target",
+        "--target-file-format", "parquet",
+        "--nested-column-name", "nested_column_test",
+        "--nested-column-key", "test_name",
+        "--nested-value-key", "test_value",
+        "--partition", "year", "numeric", "2010", "2011",
+        "--refresh", False,
+    ])
+
+    populate_tasks(mock_config, mock_q)
+
+    assert mock_q.put.call_count == 2
+    mock_q.put.assert_has_calls([
+        mocker.call([
+            UnnestTask(
+                task_id="",
+                source_location=mock_config.source_location,
+                source_file_format=mock_config.source_file_format,
+                target_location=mock_config.target_location,
+                target_file_format=mock_config.target_file_format,
+                nested_column_name=mock_config.nested_column_name,
+                nested_column_key=mock_config.nested_column_key,
+                nested_value_key=mock_config.nested_value_key,
+                partition_str="year=2010",
+                status="UNKNOWN"
+            )
+        ]),
+        mocker.call([
+            UnnestTask(
+                task_id="",
+                source_location=mock_config.source_location,
+                source_file_format=mock_config.source_file_format,
+                target_location=mock_config.target_location,
+                target_file_format=mock_config.target_file_format,
+                nested_column_name=mock_config.nested_column_name,
+                nested_column_key=mock_config.nested_column_key,
+                nested_value_key=mock_config.nested_value_key,
+                partition_str="year=2011",
+                status="UNKNOWN"
+            )
+        ])
+    ])

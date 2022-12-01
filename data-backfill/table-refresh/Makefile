@@ -20,5 +20,5 @@ fmt:
 
 .PHONY: coverage
 coverage:
-	poetry run pytest --cov=unnester_spark_job --cov-fail-under=$(MIN_COVERAGE) $(TEST_PATH)
+	poetry run pytest --cov=table_refresh --cov-fail-under=$(MIN_COVERAGE) $(TEST_PATH)
 	poetry run coverage xml
