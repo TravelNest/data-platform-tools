@@ -15,9 +15,12 @@ def default_task():
         nested_column_key="key",
         nested_value_key="value",
         partition_str="logical_date=2018-10-02/hour=5",
-        status=""
+        status="",
     )
+
 
 @pytest.fixture(autouse=True)
 def unnester_name(mocker):
-    return mocker.patch("unnester_spark_job.unnester_spark_job.UNNESTER_NAME", "unnester_test")
+    return mocker.patch(
+        "unnester_spark_job.unnester_spark_job.UNNESTER_NAME", "unnester_test"
+    )

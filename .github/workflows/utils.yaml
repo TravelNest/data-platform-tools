@@ -1,10 +1,10 @@
 on:
   push:
-    branches: [ unnester-backfill ]
+    branches: [ master ]
     paths:
     - 'utils/utils/**'
   pull_request:
-    branches: [ unnester-backfill ]
+    branches: [ master ]
     paths:
     - 'utils/utils/**'
 

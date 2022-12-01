@@ -31,7 +31,7 @@ class RefreshTask:
         return partitions
 
 
-def refresher_worker(client, in_q):
+def refresher_worker(client, in_q: Queue):
     while True:
         task = in_q.get()
         try:
@@ -49,14 +49,13 @@ def refresher_worker(client, in_q):
             )
 
             logging.info(
-                f"Table refresh status {res['StatusCode']} for partitions {task.partitions}"
+                f"Table refresh status {res['StatusCode']} for partitions {task.partition_str}"
             )
         except Exception as e:
             print(e)
             logging.info("Received incorrect task, breaking...")
             break
         finally:
-            logging.info(f"Refresher done {task.partition_str}")
             in_q.task_done()
 
 
@@ -84,7 +83,7 @@ def generate_tasks(config, out_q: Queue):
         )
 
 
-def parse_config(args):
+def parse_config(args):  # pragma: no cover
     CLI = argparse.ArgumentParser()
     CLI.add_argument("--database", required=True)
     CLI.add_argument("--table-name", required=True)
@@ -94,7 +93,7 @@ def parse_config(args):
     return config
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     config = parse_config(sys.argv[1:])
     q = Queue()
     client = boto3.client("lambda")

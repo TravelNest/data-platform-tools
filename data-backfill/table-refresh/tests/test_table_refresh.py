@@ -3,6 +3,9 @@ import json
 from queue import Queue
 
 from table_refresh.table_refresh import (
+    RefreshTask,
+    generate_tasks,
+    parse_config,
     refresher_worker,
 )
 
@@ -38,3 +41,30 @@ def test_refresher_worker_called_with_correct_args(
     )
 
     in_q.join()
+
+
+def test_generate_task_returns_expected(mocker):
+    args = [
+        "--database",
+        "testdb",
+        "--table-name",
+        "test_table",
+        "--partition",
+        "year",
+        "numeric",
+        "2020",
+        "2022",
+    ]
+    config = parse_config(args)
+    mock_q = mocker.Mock()
+
+    generate_tasks(config, mock_q)
+
+    assert mock_q.put.call_count == 3
+    mock_q.put.assert_has_calls(
+        [
+            mocker.call(RefreshTask(config.database, config.table_name, "year=2020")),
+            mocker.call(RefreshTask(config.database, config.table_name, "year=2021")),
+            mocker.call(RefreshTask(config.database, config.table_name, "year=2022")),
+        ]
+    )

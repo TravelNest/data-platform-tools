@@ -1,5 +1,5 @@
- **.venv
- **.pytest_cache
- data-backfill/table-refresh/__pycache__/
- data-backfill/table-refresh/.coverage
- **/__pycache__/
+**.venv
+**.pytest_cache
+**__pycache__
+**.coverage
+**coverage.xml
