@@ -1,0 +1,31 @@
+on:
+  push:
+    branches: [ master ]
+    paths:
+    - 'data-backfill/table-refresh/table_refresh/**'
+  pull_request:
+    branches: [ master ]
+    paths:
+    - 'data-backfill/table-refresh/table_refresh/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-python@v2
+      with:
+        python-version: '3.9'
+    - uses: snok/install-poetry@v1.1.2
+      with:
+        virtualenvs-create: false
+        virtualenvs-in-project: false
+
+    - name: Install dependencies
+      working-directory: .
+      run: (cd data-backfill/table-refresh && make install)
+
+    - name: Run tests
+      working-directory: .
+      run: (cd data-backfill/table-refresh && make lint coverage)
